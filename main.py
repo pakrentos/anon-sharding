@@ -35,6 +35,11 @@ def get_original_id(original_channel, copied_id, copied_channel):
     result = cursor.fetchone()
     return result[0] if result else None
 
+def get_copied_id(original_channel, original_id, copied_channel):
+    cursor.execute("SELECT copied_id FROM message_mapping WHERE original_channel = ? AND original_id = ? AND copied_channel = ?", (original_channel, original_id, copied_channel))
+    result = cursor.fetchone()
+    return result[0] if result else None
+
 @client.on(events.NewMessage(chats=[channel1, channel2]))
 async def copy_message(event):
     message = event.message
@@ -50,12 +55,13 @@ async def copy_message(event):
         copied_reply_id = message.reply_to_msg_id
         # Check if the original reply ID exists in the database for the source channel
         original_reply_id = get_original_id(target_channel, copied_reply_id, source_channel)
+        copied_original_reply_id = get_copied_id(source_channel, copied_reply_id, target_channel)
         if not original_reply_id is None:
             # Send the message as a reply to the copied message in the target channel
             copied_message = await client.send_message(target_channel, message, reply_to=original_reply_id)
         else:
             # If the original reply ID doesn't exist in the database, send the message without a reply
-            copied_message = await client.send_message(target_channel, message)
+            copied_message = await client.send_message(target_channel, message, reply_to=copied_original_reply_id)
     else:
         # If the message is not a reply, send it as a new message
         copied_message = await client.send_message(target_channel, message)
