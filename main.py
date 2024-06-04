@@ -1,13 +1,11 @@
 import sqlite3
-from telethon import TelegramClient, events
+from aiogram import Bot, Dispatcher, types
+from aiogram.utils import executor
 from log import logger
 import os
 
-
 # Replace these with your own values
-api_id = os.environ["API_ID"]
-api_hash = os.environ["API_HASH"]
-session_name = 'main'
+API_TOKEN = os.environ["API_TOKEN"]
 
 # Replace these with the channel IDs or usernames
 channel1 = os.getenv("CHANNEL1")
@@ -16,7 +14,8 @@ channel2 = os.getenv("CHANNEL2")
 if isinstance(channel1, str) and isinstance(channel2, str):
     channel1, channel2 = int(channel1), int(channel2)
 
-client = TelegramClient(session_name, api_id, api_hash)
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher(bot)
 
 # Connect to the SQLite database (or create it if it doesn't exist)
 conn = sqlite3.connect('message_mapping.db')
@@ -40,51 +39,67 @@ def get_copied_id(original_channel, original_id, copied_channel):
     result = cursor.fetchone()
     return result[0] if result else None
 
-@client.on(events.NewMessage(chats=[channel1, channel2]))
-async def copy_message(event):
-    message = event.message
-    source_channel = event.chat_id
-    logger.info(f"{event.chat_id=}")
-    logger.info(f"{message.id=}")
-    logger.info(f"{message.reply_to_msg_id=}")
+async def forward_media(message: types.Message, target_channel: int, reply_to_message_id: int = None):
+    if message.photo:
+        copied_message = await bot.send_photo(target_channel, message.photo[-1].file_id, caption=message.caption, reply_to_message_id=reply_to_message_id)
+    elif message.video:
+        copied_message = await bot.send_video(target_channel, message.video.file_id, caption=message.caption, reply_to_message_id=reply_to_message_id)
+    elif message.document:
+        copied_message = await bot.send_document(target_channel, message.document.file_id, caption=message.caption, reply_to_message_id=reply_to_message_id)
+    elif message.audio:
+        copied_message = await bot.send_audio(target_channel, message.audio.file_id, caption=message.caption, reply_to_message_id=reply_to_message_id)
+    else:
+        if message.text:
+            copied_message = await bot.send_message(target_channel, message.text, reply_to_message_id=reply_to_message_id)
+        else:
+            # Skip sending the message if it doesn't have any text content
+            return None
+    
+    return copied_message
+
+@dp.channel_post_handler(lambda message: message.chat.id in [channel1, channel2], content_types=types.ContentTypes.ANY)
+async def copy_message(message: types.Message):
+    source_channel = message.chat.id
+    logger.info(f"{message.chat.id=}")
+    logger.info(f"{message.message_id=}")
+    logger.info(f"{message.reply_to_message.message_id if message.reply_to_message else None=}")
     target_channel = channel2 if source_channel == channel1 else channel1
 
     # Check if the message is a reply to another message
-    if message.reply_to_msg_id:
+    if message.reply_to_message:
         # Get the original message ID of the replied message
-        copied_reply_id = message.reply_to_msg_id
+        copied_reply_id = message.reply_to_message.message_id
         # Check if the original reply ID exists in the database for the source channel
         original_reply_id = get_original_id(target_channel, copied_reply_id, source_channel)
         copied_original_reply_id = get_copied_id(source_channel, copied_reply_id, target_channel)
-        if not original_reply_id is None:
+        if original_reply_id is not None:
             # Send the message as a reply to the copied message in the target channel
-            copied_message = await client.send_message(target_channel, message, reply_to=original_reply_id)
+            copied_message = await forward_media(message, target_channel, reply_to_message_id=original_reply_id)
         else:
             # If the original reply ID doesn't exist in the database, send the message without a reply
-            copied_message = await client.send_message(target_channel, message, reply_to=copied_original_reply_id)
+            copied_message = await forward_media(message, target_channel, reply_to_message_id=copied_original_reply_id)
     else:
         # If the message is not a reply, send it as a new message
-        copied_message = await client.send_message(target_channel, message)
+        copied_message = await forward_media(message, target_channel)
 
-    logger.info(f"{copied_message.id=}")
+    logger.info(f"{copied_message.message_id=}")
 
     # Store the mapping of original message ID to copied message ID in the database
-    store_mapping(source_channel, message.id, target_channel, copied_message.id)
+    store_mapping(source_channel, message.message_id, target_channel, copied_message.message_id)
 
-@client.on(events.MessageEdited(chats=[channel1, channel2]))
-async def handle_edited_message(event):
-    message = event.message
-    source_channel = event.chat_id
+@dp.edited_channel_post_handler(lambda message: message.chat.id in [channel1, channel2], content_types=types.ContentTypes.ANY)
+async def handle_edited_message(message: types.Message):
+    source_channel = message.chat.id
     target_channel = channel2 if source_channel == channel1 else channel1
 
     # Get the copied message ID from the database
-    copied_message_id = get_copied_id(source_channel, message.id, target_channel)
+    copied_message_id = get_copied_id(source_channel, message.message_id, target_channel)
     if copied_message_id:
-        await client.edit_message(target_channel, copied_message_id, message.text, file=message.media, link_preview=message.web_preview)
+        await bot.edit_message_caption(target_channel, copied_message_id, caption=message.caption)
 
-with client:
+if __name__ == '__main__':
     logger.info("Script is running. Press Ctrl+C to stop.")
-    client.run_until_disconnected()
+    executor.start_polling(dp, skip_updates=True)
 
 # Close the database connection when the script ends
 conn.close()
