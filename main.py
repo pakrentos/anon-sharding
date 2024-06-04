@@ -48,6 +48,16 @@ async def forward_media(message: types.Message, target_channel: int, reply_to_me
         copied_message = await bot.send_document(target_channel, message.document.file_id, caption=message.caption, reply_to_message_id=reply_to_message_id)
     elif message.audio:
         copied_message = await bot.send_audio(target_channel, message.audio.file_id, caption=message.caption, reply_to_message_id=reply_to_message_id)
+    elif message.sticker:
+        copied_message = await bot.send_audio(target_channel, message.sticker.file_id, caption=message.caption, reply_to_message_id=reply_to_message_id)
+    elif message.poll:
+        copied_message = await bot.forward_message(target_channel,
+                                                   message.chat.id,
+                                                   message.message_id)
+    elif message.is_forward():
+        copied_message = await bot.forward_message(target_channel,
+                                               message.chat.id,
+                                               message.message_id)
     else:
         if message.text:
             copied_message = await bot.send_message(target_channel, message.text, reply_to_message_id=reply_to_message_id)
