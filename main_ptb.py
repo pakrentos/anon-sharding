@@ -17,6 +17,24 @@ from telethon import TelegramClient
 from telethon.tl.types import PeerChannel
 from telethon.tl.functions.messages import GetMessagesReactionsRequest
 
+CUSTOM_EMOJI_TO_ID_MAP = {
+    '(B)': 5224647090734375337,
+    '[токнау]': 5307977565175029928,
+    '(токнау)': 5305776162507596250,
+    '𝕋𝕒𝕝': 5307935766553304360,
+    '𝕜ℕ': 5305747476421027973,
+    '𝕠𝕨': 5305495104142713367,
+    '𝐓𝐚𝐥': 5307801694854191826,
+    '𝐤𝐍': 5308050107172659858,
+    '𝐨𝐰': 5305459232575857422,
+    'юрец': 5307972372559568260,
+    'гол': 5262944983400334596,
+    'гоол': 5262983208609269585,
+    'гооол': 5263001522349819939,
+    'натер': 4978814394050806930,
+}
+ID_TO_CUSTOM_EMOJI_MAP = {v:k for k,v in CUSTOM_EMOJI_TO_ID_MAP.items()}
+
 # Load environment variables
 load_dotenv(".env")
 
@@ -25,6 +43,7 @@ API_TOKEN = os.getenv("API_TOKEN")
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 PHONE_NUMBER = os.getenv("PHONE_NUMBER")
+MESSAGE_CHECK_FOR_REACTIONS_LIMIT = os.getenv("MESSAGE_CHECK_FOR_REACTIONS_LIMIT", 100)
 
 # Channel configurations
 channel1 = os.getenv("CHANNEL1")
@@ -93,7 +112,7 @@ def get_stored_reactions(channel_id, message_id):
     cursor.execute("SELECT reaction_data FROM message_reactions WHERE channel_id = ? AND message_id = ?", 
                   (channel_id, message_id))
     result = cursor.fetchone()
-    return json.loads(result[0]) if result else None
+    return json.loads(result[0]) if result else {}
 
 def store_reactions(channel_id, message_id, reaction_data):
     """Store reactions for a message in the database."""
@@ -123,13 +142,18 @@ def to_ptb_channel(channel_id):
     return channel_id
 
 # Reaction handling functions
-async def extract_message_reactions(message):
+async def extract_message_reactions(message: Message):
     """Extract reactions from a telethon message object into a dictionary."""
     reactions_dict = {}
     if hasattr(message, 'reactions') and message.reactions:
         if hasattr(message.reactions, 'results'):
             for reaction in message.reactions.results:
-                reaction_type = str(reaction.reaction.emoticon)
+                if hasattr(reaction.reaction, 'emoticon'):
+                    reaction_type = str(reaction.reaction.emoticon)
+                elif hasattr(reaction.reaction, 'document_id'):
+                    reaction_type = ID_TO_CUSTOM_EMOJI_MAP.get(reaction.reaction.document_id, 'хз')
+                else:
+                    reaction_type = "✡"
                 reaction_count = reaction.count
                 reactions_dict[reaction_type] = reaction_count
     return reactions_dict
@@ -172,33 +196,36 @@ async def combine_reactions(source_reactions, target_reactions):
     
     return combined_reactions
 
-async def update_message_with_reactions(bot, chat_id, message_id, message_text, reactions_summary, is_text):
+async def update_message_with_reactions(bot: Bot, chat_id, message, message_text, reactions_summary, is_text):
     """Update a message with the given text and reactions."""
     try:
         new_text = f"{message_text}\n{reactions_summary}" if reactions_summary else message_text
-        
-        if is_text:
+        if message.media is None:
             await bot.edit_message_text(
                 text=new_text,
                 chat_id=chat_id,
-                message_id=message_id
+                message_id=message.id,
             )
         else:
             await bot.edit_message_caption(
                 caption=new_text,
                 chat_id=chat_id,
-                message_id=message_id
+                message_id=message.id
             )
         return True
     except Exception as e:
-        logger.error(f"Error updating message {message_id} in chat {chat_id}: {e}")
+        logger.error(f"Error updating message {message.id} in chat {chat_id}: {e}")
         return False
 
-async def process_reaction_change(bot, channel_id, message_id, reactions_dict):
+async def process_reaction_change(bot, channel_id, message, reactions_dict):
     """Process a change in message reactions."""
+    message_id = message.id
     try:
         logger.info(f"Processing reaction change for message {message_id} in channel {channel_id}")
         
+        pred_reaction = get_stored_reactions(channel_id, message_id)
+        for k, v in pred_reaction.items():
+            reactions_dict[k] = max(reactions_dict.get(k, 0), v)
         # Store the updated reactions
         store_reactions(channel_id, message_id, reactions_dict)
         
@@ -243,7 +270,7 @@ async def process_reaction_change(bot, channel_id, message_id, reactions_dict):
                 success = await update_message_with_reactions(
                     bot, 
                     source_channel_ptb,
-                    message_id,
+                    source_message,
                     source_text,
                     reactions_text,
                     source_is_text
@@ -257,7 +284,7 @@ async def process_reaction_change(bot, channel_id, message_id, reactions_dict):
                 success = await update_message_with_reactions(
                     bot,
                     target_channel_ptb,
-                    copied_message_id,
+                    target_message,
                     target_text,
                     reactions_text,
                     target_is_text
@@ -666,7 +693,7 @@ async def check_reactions(app: Application):
         try:
             for channel_id in [channel1_telethon, channel2_telethon]:
                 # Get recent messages from the channel
-                async for message in telethon_client.iter_messages(PeerChannel(channel_id), limit=20):
+                async for message in telethon_client.iter_messages(PeerChannel(channel_id), limit=MESSAGE_CHECK_FOR_REACTIONS_LIMIT):
                     if message.reactions:
                         # Extract reactions from the message
                         reactions_dict = await extract_message_reactions(message)
@@ -677,7 +704,7 @@ async def check_reactions(app: Application):
                             logger.info(f"New reactions: {reactions_dict}")
                             
                             # Process the reaction change
-                            await process_reaction_change(bot, channel_id, message.id, reactions_dict)
+                            await process_reaction_change(bot, channel_id, message, reactions_dict)
         except Exception as e:
             stack_trace = traceback.format_exc()
             logger.error(f"Error in check_reactions: {e}\n{stack_trace}")
