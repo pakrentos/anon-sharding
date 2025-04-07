@@ -43,7 +43,7 @@ API_TOKEN = os.getenv("API_TOKEN")
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 PHONE_NUMBER = os.getenv("PHONE_NUMBER")
-MESSAGE_CHECK_FOR_REACTIONS_LIMIT = os.getenv("MESSAGE_CHECK_FOR_REACTIONS_LIMIT", 100)
+MESSAGE_CHECK_FOR_REACTIONS_LIMIT = int(os.getenv("MESSAGE_CHECK_FOR_REACTIONS_LIMIT", 100))
 
 # Channel configurations
 channel1 = os.getenv("CHANNEL1")
