@@ -158,23 +158,20 @@ async def extract_message_reactions(message: Message):
                 reactions_dict[reaction_type] = reaction_count
     return reactions_dict
 
-async def get_message_text_and_type(message):
+async def get_message_text(message):
     """Get message text/caption and determine if it's text or caption."""
     message_text = ""
-    is_text = False
-    
+
     if hasattr(message, 'text') and message.text:
         message_text = message.text
-        is_text = True
     elif hasattr(message, 'caption') and message.caption:
         message_text = message.caption
-        is_text = False
-    
+
     # Remove existing reaction section if present
     if "---" in message_text:
         message_text = message_text.split("---")[0].strip()
         
-    return message_text, is_text
+    return message_text
 
 async def build_reactions_summary(reactions_dict):
     """Build a formatted string of reactions for display."""
@@ -196,8 +193,9 @@ async def combine_reactions(source_reactions, target_reactions):
     
     return combined_reactions
 
-async def update_message_with_reactions(bot: Bot, chat_id, message, message_text, reactions_summary, is_text):
+async def update_message_with_reactions(bot: Bot, chat_id, message, reactions_summary):
     """Update a message with the given text and reactions."""
+    message_text = await get_message_text(message)
     try:
         new_text = f"{message_text}\n{reactions_summary}" if reactions_summary else message_text
         if message.media is None:
@@ -265,32 +263,24 @@ async def process_reaction_change(bot, channel_id, message, reactions_dict):
         
         # Update both messages with the combined reactions
         if source_message:
-            source_text, source_is_text = await get_message_text_and_type(source_message)
-            if source_text:
-                success = await update_message_with_reactions(
-                    bot, 
-                    source_channel_ptb,
-                    source_message,
-                    source_text,
-                    reactions_text,
-                    source_is_text
-                )
-                if success:
-                    logger.info(f"Updated source message {message_id} with reactions")
-        
+            success = await update_message_with_reactions(
+                bot,
+                source_channel_ptb,
+                source_message,
+                reactions_text,
+            )
+            if success:
+                logger.info(f"Updated source message {message_id} with reactions")
+
         if target_message:
-            target_text, target_is_text = await get_message_text_and_type(target_message)
-            if target_text:
-                success = await update_message_with_reactions(
-                    bot,
-                    target_channel_ptb,
-                    target_message,
-                    target_text,
-                    reactions_text,
-                    target_is_text
-                )
-                if success:
-                    logger.info(f"Updated target message {copied_message_id} with reactions")
+            success = await update_message_with_reactions(
+                bot,
+                target_channel_ptb,
+                target_message,
+                reactions_text
+            )
+            if success:
+                logger.info(f"Updated target message {copied_message_id} with reactions")
                     
     except Exception as e:
         stack_trace = traceback.format_exc()
