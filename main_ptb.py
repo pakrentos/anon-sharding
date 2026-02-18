@@ -144,10 +144,10 @@ def to_ptb_channel(channel_id):
 
 
 def replace_x_links(text: str) -> str:
-    """Replace x.com links with vxtwitter.com."""
+    """Replace x.com links with fxtwitter.com."""
     if not text:
         return text
-    return re.sub(r"(?i)\b((?:https?://)?)(?:www\.)?x\.com(?=/|\b)", r"\1vxtwitter.com", text)
+    return re.sub(r"(?i)\b((?:https?://)?)(?:www\.)?x\.com(?=/|\b)", r"\1fxtwitter.com", text)
 
 
 async def normalize_source_message_links(bot: Bot, message: Message):
