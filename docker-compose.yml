@@ -5,6 +5,7 @@ services:
     build: .
     volumes:
       - ./message_mapping.db:/app/message_mapping.db
+      - ./telethon_session.session:/app/telethon_session.session
     env_file:
       - .env
     restart: unless-stopped 
