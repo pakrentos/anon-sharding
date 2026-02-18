@@ -3,6 +3,7 @@ import json
 import time
 import asyncio
 import os
+import re
 from dotenv import load_dotenv
 from log import logger
 import traceback
@@ -141,6 +142,38 @@ def to_ptb_channel(channel_id):
         channel_id = "-100" + str(channel_id)
     return channel_id
 
+
+def replace_x_links(text: str) -> str:
+    """Replace x.com links with vxtwitter.com."""
+    if not text:
+        return text
+    return re.sub(r"(?i)\b((?:https?://)?)(?:www\.)?x\.com(?=/|\b)", r"\1vxtwitter.com", text)
+
+
+async def normalize_source_message_links(bot: Bot, message: Message):
+    """Edit source message in place if it contains x.com links."""
+    try:
+        if message.text:
+            replaced_text = replace_x_links(message.text)
+            if replaced_text != message.text:
+                await bot.edit_message_text(
+                    chat_id=message.chat_id,
+                    message_id=message.message_id,
+                    text=replaced_text,
+                    entities=message.entities
+                )
+        elif message.caption:
+            replaced_caption = replace_x_links(message.caption)
+            if replaced_caption != message.caption:
+                await bot.edit_message_caption(
+                    chat_id=message.chat_id,
+                    message_id=message.message_id,
+                    caption=replaced_caption,
+                    caption_entities=message.caption_entities
+                )
+    except Exception as e:
+        logger.warning(f"Failed to normalize source message {message.message_id}: {e}")
+
 # Reaction handling functions
 async def extract_message_reactions(message: Message):
     """Extract reactions from a telethon message object into a dictionary."""
@@ -170,8 +203,8 @@ async def get_message_text(message):
     # Remove existing reaction section if present
     if "---" in message_text:
         message_text = message_text.split("---")[0].strip()
-        
-    return message_text
+
+    return replace_x_links(message_text)
 
 async def build_reactions_summary(reactions_dict):
     """Build a formatted string of reactions for display."""
@@ -308,11 +341,20 @@ async def forward_media(bot: Bot, message: Message, target_channel: int, reply_t
                 from_chat_id=message.chat_id,
                 message_id=message.message_id
             )
+        elif message.text:
+            copied_message = await bot.send_message(
+                chat_id=target_channel,
+                text=replace_x_links(message.text),
+                entities=message.entities,
+                reply_to_message_id=reply_to_message_id
+            )
         else:
             copied_message = await bot.copy_message(
                 chat_id=target_channel,
                 from_chat_id=message.chat_id,
                 message_id=message.message_id,
+                caption=replace_x_links(message.caption) if message.caption else None,
+                caption_entities=message.caption_entities,
                 reply_to_message_id=reply_to_message_id
             )
     except Exception as e:
@@ -344,6 +386,8 @@ async def channel_post_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     message = update.channel_post
     if not message:
         return
+
+    await normalize_source_message_links(context.bot, message)
 
     logger.info(f"Copy message: {message.text if message.text else '(Media message)'}")
     source_channel = message.chat_id
@@ -505,25 +549,25 @@ async def process_media_group(context, media_group_id):
             if msg.photo:
                 media.append(InputMediaPhoto(
                     media=msg.photo[-1].file_id,
-                    caption=msg.caption,
+                    caption=replace_x_links(msg.caption),
                     parse_mode=ParseMode.HTML if hasattr(msg, 'caption_html') and msg.caption_html else None
                 ))
             elif msg.video:
                 media.append(InputMediaVideo(
                     media=msg.video.file_id,
-                    caption=msg.caption,
+                    caption=replace_x_links(msg.caption),
                     parse_mode=ParseMode.HTML if hasattr(msg, 'caption_html') and msg.caption_html else None
                 ))
             elif msg.audio:
                 media.append(InputMediaAudio(
                     media=msg.audio.file_id,
-                    caption=msg.caption,
+                    caption=replace_x_links(msg.caption),
                     parse_mode=ParseMode.HTML if hasattr(msg, 'caption_html') and msg.caption_html else None
                 ))
             elif msg.document:
                 media.append(InputMediaDocument(
                     media=msg.document.file_id,
-                    caption=msg.caption,
+                    caption=replace_x_links(msg.caption),
                     parse_mode=ParseMode.HTML if hasattr(msg, 'caption_html') and msg.caption_html else None
                 ))
         
@@ -641,7 +685,9 @@ async def edited_channel_post_handler(update: Update, context: ContextTypes.DEFA
     message = update.edited_channel_post
     if not message:
         return
-        
+
+    await normalize_source_message_links(context.bot, message)
+
     logger.info(f"Edited message: {message.text}")
     source_channel = message.chat_id
     target_channel = channel2 if source_channel == channel1 else channel1
@@ -654,13 +700,13 @@ async def edited_channel_post_handler(update: Update, context: ContextTypes.DEFA
         try:
             if message.text:
                 await context.bot.edit_message_text(
-                    text=message.text,
+                    text=replace_x_links(message.text),
                     chat_id=target_channel,
                     message_id=copied_message_id
                 )
             elif message.caption:
                 await context.bot.edit_message_caption(
-                    caption=message.caption,
+                    caption=replace_x_links(message.caption),
                     chat_id=target_channel,
                     message_id=copied_message_id
                 )
