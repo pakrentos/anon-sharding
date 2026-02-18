@@ -1,0 +1,10 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    volumes:
+      - ./message_mapping.db:/app/message_mapping.db
+    env_file:
+      - .env
+    restart: unless-stopped 
